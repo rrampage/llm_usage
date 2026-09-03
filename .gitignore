@@ -1,0 +1,7 @@
+/llm_usage
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.tmp
