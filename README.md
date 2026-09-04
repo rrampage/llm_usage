@@ -11,6 +11,18 @@ SQLite.
 go build -o llm_usage .
 ```
 
+Local builds report dev by default. To build with an explicit version:
+
+```sh
+make build VERSION=0.1.3
+```
+
+To create and push an annotated release tag from the current clean master commit:
+
+```sh
+make release VERSION=0.1.3
+```
+
 To install the command into your Go bin directory:
 
 ```sh

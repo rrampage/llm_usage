@@ -5,60 +5,140 @@ on:
     tags:
       - "v*"
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
 
-      - name: Test
-        run: go test ./...
-
-      - name: Build release binaries
+      - name: Validate release tag
         shell: bash
         run: |
           set -euo pipefail
 
+          # Require exact semantic-version tags: v1.2.3
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release tag: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+
+          # Only release commits that exist on master.
+          git fetch --no-tags origin master
+
+          if ! git merge-base --is-ancestor HEAD origin/master; then
+            echo "Release tag does not point to a commit on master" >&2
+            exit 1
+          fi
+
+      - name: Build release binaries
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+
           VERSION="${GITHUB_REF_NAME#v}"
-          mkdir -p dist
+
+          rm -rf dist
+          mkdir dist
 
           for ARCH in amd64 arm64; do
             NAME="llm_usage_${VERSION}_linux_${ARCH}"
 
-            CGO_ENABLED=0 \
             GOOS=linux \
             GOARCH="${ARCH}" \
               go build \
                 -trimpath \
+                -ldflags "-X main.version=$VERSION" \
                 -o "dist/${NAME}" \
                 .
 
-            tar -C dist -czf "dist/${NAME}.tar.gz" "${NAME}"
+            tar -C dist \
+              -czf "dist/${NAME}.tar.gz" \
+              "${NAME}"
+
             rm "dist/${NAME}"
           done
 
           (
             cd dist
-            sha256sum *.tar.gz > checksums.txt
+
+            sha256sum \
+              "llm_usage_${VERSION}_linux_amd64.tar.gz" \
+              "llm_usage_${VERSION}_linux_arm64.tar.gz" \
+              > checksums.txt
           )
+
+      - name: Store release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-assets
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+
+  publish:
+    needs: build
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-assets
+          path: dist
+
+      - name: Verify assets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          test -f "dist/llm_usage_${VERSION}_linux_amd64.tar.gz"
+          test -f "dist/llm_usage_${VERSION}_linux_arm64.tar.gz"
+          test -f "dist/checksums.txt"
+
+          cd dist
+          sha256sum -c checksums.txt
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
+          set -euo pipefail
+
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          gh release create "$GITHUB_REF_NAME" \
             --verify-tag \
             --generate-notes \
-            --title "${GITHUB_REF_NAME}" \
-            dist/*
+            --title "$GITHUB_REF_NAME" \
+            "dist/llm_usage_${VERSION}_linux_amd64.tar.gz" \
+            "dist/llm_usage_${VERSION}_linux_arm64.tar.gz" \
+            "dist/checksums.txt"

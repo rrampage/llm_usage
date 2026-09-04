@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const version = "0.1.2"
+var version = "dev"
 
 type Event struct {
 	Harness            string
