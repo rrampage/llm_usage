@@ -62,6 +62,30 @@ func TestLoadCodexFileFiltersReplayAfterSinglePass(t *testing.T) {
 	}
 }
 
+func TestCodexTokenizerParsesRepresentativeRecords(t *testing.T) {
+	path := writeCodexTestFile(t,
+		`{"type":"session_meta","payload":{"cwd":"/tmp/project","id":"session-1"}}`,
+		`{"type":"turn_context","payload":{"model":"gpt-5.5"}}`,
+		codexTestTokenLine("2026-08-01T00:00:00Z", 10, 2, 12),
+		`{"type":"response","createdAt":"2026-08-01T00:00:01Z","model_name":"gpt-5.5","result":{"usage":{"input_tokens":"20","output_tokens":4,"total_tokens":24}}}`,
+		`{"type":"response_item","payload":{"type":"message","content":[{"text":"contains token_count and usage words"}]}}`,
+	)
+
+	events, stats := loadCodexTestFile(t, path)
+	if len(events) != 2 {
+		t.Fatalf("got %d events, want 2: %#v", len(events), events)
+	}
+	if e := events[0]; e.Session != "session-1" || e.Project != "/tmp/project" || e.Model != "gpt-5.5" || e.Input != 10 || e.Output != 2 || e.Total != 12 {
+		t.Fatalf("token event = %#v, want session metadata and usage fields", e)
+	}
+	if e := events[1]; e.Model != "gpt-5.5" || e.Input != 20 || e.Output != 4 || e.Total != 24 {
+		t.Fatalf("direct usage event = %#v, want nested usage fields", e)
+	}
+	if stats.Lines != 5 || stats.Malformed != 0 || stats.Skipped != 0 || stats.ReplaySkipped != 0 {
+		t.Fatalf("stats = %#v, want five valid lines and no skips", stats)
+	}
+}
+
 func TestLoadCodexFileKeepsPreTaskUsageWithoutReplayTrigger(t *testing.T) {
 	path := writeCodexTestFile(t,
 		codexTestTokenLine("2026-08-01T00:00:00Z", 10, 2, 12),

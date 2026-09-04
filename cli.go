@@ -34,7 +34,7 @@ func run(args []string) error {
 			return nil
 		}
 	}
-	harnessName, report, rest, err := parseCommand(args)
+	report, rest, err := parseCommand(args)
 	if err != nil {
 		return err
 	}
@@ -45,19 +45,13 @@ func run(args []string) error {
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	sinceText := fs.String("since", "", "inclusive local date, YYYY-MM-DD (defaults to last 3 months for daily reports)")
 	untilText := fs.String("until", "", "inclusive local date, YYYY-MM-DD")
-	tzText := fs.String("timezone", "Local", "Local, UTC, or IANA timezone")
+	harnessText := fs.String("harness", "all", "harness to report: all, claude, codex, pi, gemini, antigravity, opencode, or crush")
+	modelText := fs.String("model", "", "only include usage for this model")
 	pricingPath := fs.String("pricing", "", "override local pricing JSON (default: XDG data directory)")
 	strict := fs.Bool("strict", false, "fail on malformed relevant JSONL records")
 	verbose := fs.Bool("verbose", false, "print parser diagnostics")
 	noCost := fs.Bool("no-cost", false, "do not calculate or print cost")
 	showVersion := fs.Bool("version", false, "print version")
-	claudePath := fs.String("claude-path", "", "comma-separated Claude projects roots")
-	codexPath := fs.String("codex-path", "", "comma-separated Codex homes or JSONL roots")
-	piPath := fs.String("pi-path", "", "comma-separated pi sessions roots")
-	geminiPath := fs.String("gemini-path", "", "comma-separated Gemini CLI data roots")
-	antigravityPath := fs.String("antigravity-path", "", "comma-separated Antigravity data roots")
-	opencodePath := fs.String("opencode-path", "", "comma-separated OpenCode data roots")
-	crushPath := fs.String("crush-path", "", "comma-separated Crush data roots, project roots, DBs, or projects.json")
 	var genericPaths pathFlag
 	fs.Var(&genericPaths, "path", "repeatable harness=path override; works for future adapters too")
 	if err := fs.Parse(rest); err != nil {
@@ -71,10 +65,12 @@ func run(args []string) error {
 		return nil
 	}
 
-	loc, err := loadLocation(*tzText)
-	if err != nil {
-		return err
+	harnessName := strings.ToLower(strings.TrimSpace(*harnessText))
+	if harnessName == "" {
+		return errors.New("--harness cannot be empty")
 	}
+	modelFilter := strings.TrimSpace(*modelText)
+	loc := time.Local
 	since, until, err := determineDateBounds(*sinceText, *untilText, *allTime, report, loc, time.Now().In(loc))
 	if err != nil {
 		return err
@@ -117,17 +113,9 @@ func run(args []string) error {
 		return fmt.Errorf("unknown harness %q", harnessName)
 	}
 
-	pathOverrides := map[string][]string{
-		"claude":      splitPaths(*claudePath),
-		"codex":       splitPaths(*codexPath),
-		"pi":          splitPaths(*piPath),
-		"gemini":      splitPaths(*geminiPath),
-		"antigravity": splitPaths(*antigravityPath),
-		"opencode":    splitPaths(*opencodePath),
-		"crush":       splitPaths(*crushPath),
-	}
+	pathOverrides := map[string][]string{}
 	for name, paths := range genericPaths {
-		pathOverrides[name] = uniqueStrings(append(pathOverrides[name], paths...))
+		pathOverrides[name] = uniqueStrings(paths)
 	}
 	ctx := &LoadContext{
 		Strict:  *strict,
@@ -158,6 +146,9 @@ func run(args []string) error {
 			fmt.Fprintf(os.Stderr, "%s roots: %s\n", h.Name(), strings.Join(roots, ", "))
 		}
 		if err := h.Load(ctx, roots, func(e Event) error {
+			if modelFilter != "" && !strings.EqualFold(strings.TrimSpace(e.Model), modelFilter) {
+				return nil
+			}
 			if !since.IsZero() && e.Timestamp.In(loc).Before(since) {
 				return nil
 			}
@@ -185,7 +176,7 @@ func printUsage() {
 	fmt.Fprint(os.Stdout, `llm_usage - offline local usage reporter
 
 Usage:
-  llm_usage [all|claude|codex|pi|gemini|antigravity|opencode|crush] [daily|weekly|monthly|session|model] [options]
+  llm_usage [daily|weekly|monthly|session|model] [options]
   llm_usage pricing path
   llm_usage pricing status
   llm_usage pricing update
@@ -193,13 +184,13 @@ Usage:
 Examples:
   llm_usage                   # default: daily report for last 3 months
   llm_usage --all             # daily report across all history
-  llm_usage codex daily --json
-  llm_usage claude monthly --since 2026-09-01
-  llm_usage pi session --pi-path ~/.pi/agent/sessions
-  llm_usage gemini daily
-  llm_usage antigravity monthly
-  llm_usage opencode daily
-  llm_usage crush monthly
+  llm_usage daily --harness codex --json
+  llm_usage monthly --harness claude --since 2026-09-01
+  llm_usage session --harness pi --path pi=~/.pi/agent/sessions
+  llm_usage daily --harness gemini
+  llm_usage monthly --harness antigravity
+  llm_usage daily --harness opencode
+  llm_usage monthly --harness crush --path crush=/src/project/.crush
   llm_usage daily --path codex=/tmp/codex-logs --path pi=/tmp/pi-sessions
   llm_usage daily             # date x model rows, then TOTAL (last 3 months by default)
   llm_usage weekly            # week x model rows, then TOTAL
@@ -209,13 +200,14 @@ Examples:
 
 Important options:
   --all                  include all historical usage (disable default 3-month cutoff for daily)
+  --harness NAME         report one harness (default: all)
+  --model NAME           only include usage for one model
   --json                 JSON output
   --since YYYY-MM-DD     inclusive date filter (defaults to last 3 months for daily)
   --until YYYY-MM-DD     inclusive date filter
-  --timezone ZONE        Local, UTC, or IANA name
   --pricing FILE         override the local price book; reporting remains offline
   --no-cost              token accounting only
-  --path agent=DIR       repeatable generic path override
+  --path HARNESS=PATH    repeatable path override for any harness
   --strict               fail on malformed relevant JSONL
   --verbose              parser/dedup diagnostics
 
@@ -228,7 +220,7 @@ Offline/pricing:
 
 Adding a harness:
   implement the Harness interface and register it in allHarnesses() in adapters.go.
-  The generic --path agent=DIR override requires no new CLI flag.
+  The generic --path HARNESS=PATH override requires no new CLI flag.
 `)
 }
 
@@ -250,9 +242,9 @@ func (p *pathFlag) String() string {
 
 func (p *pathFlag) Set(s string) error {
 	name, raw, ok := strings.Cut(s, "=")
-	name = strings.TrimSpace(name)
+	name = strings.ToLower(strings.TrimSpace(name))
 	if !ok || name == "" || strings.TrimSpace(raw) == "" {
-		return fmt.Errorf("--path must be harness=directory")
+		return fmt.Errorf("--path must be harness=path")
 	}
 	if *p == nil {
 		*p = pathFlag{}
@@ -261,38 +253,23 @@ func (p *pathFlag) Set(s string) error {
 	return nil
 }
 
-func parseCommand(args []string) (harness, report string, rest []string, err error) {
-	harness, report = "all", "daily"
-	knownHarness := map[string]bool{"all": true, "claude": true, "codex": true, "pi": true, "gemini": true, "antigravity": true, "opencode": true, "crush": true}
-	knownReport := map[string]bool{"daily": true, "weekly": true, "monthly": true, "session": true, "model": true}
-	for len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		x := strings.ToLower(args[0])
-		switch {
-		case knownHarness[x] && harness == "all":
-			harness = x
-		case knownReport[x] && report == "daily":
-			report = x
-		default:
-			return "", "", nil, fmt.Errorf("unknown command %q", args[0])
-		}
-		args = args[1:]
+func parseCommand(args []string) (report string, rest []string, err error) {
+	report = "daily"
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return report, args, nil
 	}
-	return harness, report, args, nil
-}
 
-func loadLocation(s string) (*time.Location, error) {
-	switch strings.ToLower(s) {
-	case "", "local":
-		return time.Local, nil
-	case "utc":
-		return time.UTC, nil
+	report = strings.ToLower(args[0])
+	switch report {
+	case "daily", "weekly", "monthly", "session", "model":
+		args = args[1:]
 	default:
-		loc, err := time.LoadLocation(s)
-		if err != nil {
-			return nil, fmt.Errorf("invalid timezone %q: %w", s, err)
-		}
-		return loc, nil
+		return "", nil, fmt.Errorf("unknown report period %q (use --harness to select a harness)", args[0])
 	}
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		return "", nil, fmt.Errorf("unexpected command %q; the report period must be the only positional argument", args[0])
+	}
+	return report, args, nil
 }
 
 func parseDateBound(s string, loc *time.Location) (time.Time, error) {

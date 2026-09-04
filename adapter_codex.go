@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -144,6 +142,10 @@ type codexFileResult struct {
 }
 
 func (codexHarness) Load(ctx *LoadContext, roots []string, emit func(Event) error) error {
+	return loadCodexFiles(ctx, roots, emit)
+}
+
+func loadCodexFiles(ctx *LoadContext, roots []string, emit func(Event) error) error {
 	stats := ctx.stat("codex")
 	seen := map[string]struct{}{}
 	var refs []codexFileRef
@@ -291,18 +293,8 @@ func loadCodexFile(ctx *LoadContext, path, root string, emit func(Event) error) 
 
 	if err := forEachLine(path, func(line []byte, lineNo int) error {
 		stats.Lines++
-		// Avoid decoding large transcript/tool records that cannot contain
-		// usage or session metadata.
-		if !bytes.Contains(line, []byte("token_count")) &&
-			!bytes.Contains(line, []byte("session_meta")) &&
-			!bytes.Contains(line, []byte("turn_context")) &&
-			!bytes.Contains(line, []byte("task_started")) &&
-			!bytes.Contains(line, []byte("inter_agent_communication")) &&
-			!bytes.Contains(line, []byte(`"usage"`)) {
-			return nil
-		}
-		var row codexLine
-		if err := json.Unmarshal(line, &row); err != nil {
+		row, err := parseCodexLineTokenizer(line)
+		if err != nil {
 			return reportMalformed(ctx, "codex", path, lineNo, err)
 		}
 

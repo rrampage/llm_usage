@@ -3,9 +3,63 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestParseCommand(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantReport string
+		wantRest   []string
+		wantErr    string
+	}{
+		{name: "default daily", args: nil, wantReport: "daily"},
+		{name: "period first", args: []string{"weekly", "--harness", "codex"}, wantReport: "weekly", wantRest: []string{"--harness", "codex"}},
+		{name: "case insensitive period", args: []string{"MONTHLY"}, wantReport: "monthly"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotReport, gotRest, err := parseCommand(tc.args)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("parseCommand(%v) error = %v, want substring %q", tc.args, err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseCommand(%v) returned error: %v", tc.args, err)
+			}
+			if gotReport != tc.wantReport {
+				t.Errorf("report = %q, want %q", gotReport, tc.wantReport)
+			}
+			if len(gotRest) != len(tc.wantRest) {
+				t.Fatalf("rest = %v, want %v", gotRest, tc.wantRest)
+			}
+			for i := range gotRest {
+				if gotRest[i] != tc.wantRest[i] {
+					t.Errorf("rest[%d] = %q, want %q", i, gotRest[i], tc.wantRest[i])
+				}
+			}
+		})
+	}
+}
+
+func TestPathFlag(t *testing.T) {
+	var paths pathFlag
+	if err := paths.Set("crush=/tmp/project/.crush"); err != nil {
+		t.Fatalf("Set returned error: %v", err)
+	}
+	if got := strings.Join(paths["crush"], ","); got != "/tmp/project/.crush" {
+		t.Fatalf("crush path = %q, want %q", got, "/tmp/project/.crush")
+	}
+	if err := paths.Set("/tmp/project/.crush"); err == nil {
+		t.Fatal("Set accepted a path without a harness name")
+	}
+}
 
 func TestDetermineDateBounds(t *testing.T) {
 	loc := time.UTC
