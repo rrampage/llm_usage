@@ -59,22 +59,44 @@ jobs:
           rm -rf dist
           mkdir dist
 
-          for ARCH in amd64 arm64; do
-            NAME="llm_usage_${VERSION}_linux_${ARCH}"
+          targets=(
+            "linux amd64 tar.gz"
+            "linux arm64 tar.gz"
+            "darwin arm64 tar.gz"
+            "windows amd64 zip"
+            "windows arm64 zip"
+          )
 
-            GOOS=linux \
-            GOARCH="${ARCH}" \
+          for target in "${targets[@]}"; do
+            read -r GOOS GOARCH FORMAT <<< "$target"
+            NAME="llm_usage_${VERSION}_${GOOS}_${GOARCH}"
+            BINARY="${NAME}"
+
+            if [[ "$GOOS" == "windows" ]]; then
+              BINARY="${BINARY}.exe"
+            fi
+
+            GOOS="${GOOS}" \
+            GOARCH="${GOARCH}" \
               go build \
                 -trimpath \
                 -ldflags "-X main.version=$VERSION" \
-                -o "dist/${NAME}" \
+                -o "dist/${BINARY}" \
                 .
 
-            tar -C dist \
-              -czf "dist/${NAME}.tar.gz" \
-              "${NAME}"
+            ARCHIVE="${NAME}.${FORMAT}"
+            if [[ "$FORMAT" == "zip" ]]; then
+              (
+                cd dist
+                zip -q "${ARCHIVE}" "${BINARY}"
+              )
+            else
+              tar -C dist \
+                -czf "dist/${ARCHIVE}" \
+                "${BINARY}"
+            fi
 
-            rm "dist/${NAME}"
+            rm "dist/${BINARY}"
           done
 
           (
@@ -83,6 +105,9 @@ jobs:
             sha256sum \
               "llm_usage_${VERSION}_linux_amd64.tar.gz" \
               "llm_usage_${VERSION}_linux_arm64.tar.gz" \
+              "llm_usage_${VERSION}_darwin_arm64.tar.gz" \
+              "llm_usage_${VERSION}_windows_amd64.zip" \
+              "llm_usage_${VERSION}_windows_arm64.zip" \
               > checksums.txt
           )
 
@@ -120,6 +145,9 @@ jobs:
 
           test -f "dist/llm_usage_${VERSION}_linux_amd64.tar.gz"
           test -f "dist/llm_usage_${VERSION}_linux_arm64.tar.gz"
+          test -f "dist/llm_usage_${VERSION}_darwin_arm64.tar.gz"
+          test -f "dist/llm_usage_${VERSION}_windows_amd64.zip"
+          test -f "dist/llm_usage_${VERSION}_windows_arm64.zip"
           test -f "dist/checksums.txt"
 
           cd dist
@@ -141,4 +169,7 @@ jobs:
             --title "$GITHUB_REF_NAME" \
             "dist/llm_usage_${VERSION}_linux_amd64.tar.gz" \
             "dist/llm_usage_${VERSION}_linux_arm64.tar.gz" \
+            "dist/llm_usage_${VERSION}_darwin_arm64.tar.gz" \
+            "dist/llm_usage_${VERSION}_windows_amd64.zip" \
+            "dist/llm_usage_${VERSION}_windows_arm64.zip" \
             "dist/checksums.txt"
