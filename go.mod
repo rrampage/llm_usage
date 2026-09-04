@@ -1,4 +1,4 @@
-module llm_usage
+module github.com/rrampage/llm_usage
 
 go 1.26
 

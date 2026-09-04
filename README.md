@@ -1,4 +1,4 @@
-`llm_usage` is an offline-first local usage reporter for AI coding harnesses inspired by ccusage. It normalizes token/cost records from Claude Code, Codex, pi-agent, Gemini CLI, Google Antigravity, OpenCode, and Crush, then reports daily/weekly/monthly, session, or model totals.
+`llm_usage` is an offline-first local usage reporter for AI coding harnesses inspired by [ccusage](https://github.com/ccusage/ccusage). It normalizes token/cost records from Claude Code, Codex, pi-agent, Gemini CLI, Google Antigravity, OpenCode, and Crush, then reports daily/weekly/monthly, session, or model totals.
 
 Normal reporting does not make network requests. The only network-capable production command is the explicit `llm_usage pricing update` operation.
 
@@ -9,6 +9,18 @@ SQLite.
 
 ```sh
 go build -o llm_usage .
+```
+
+To install the command into your Go bin directory:
+
+```sh
+go install github.com/rrampage/llm_usage@latest
+```
+
+To install a specific release:
+
+```sh
+go install github.com/rrampage/llm_usage@v0.1.0
 ```
 
 
@@ -37,4 +49,3 @@ llm_usage --all           # disable the default 3-month cutoff for daily reports
 llm_usage --json
 llm_usage daily --path opencode=/tmp/opencode --path crush=/src/project/.crush
 ```
-
