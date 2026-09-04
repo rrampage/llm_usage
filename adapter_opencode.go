@@ -39,15 +39,6 @@ func (openCodeHarness) Load(ctx *LoadContext, roots []string, emit func(Event) e
 	var events []openCodeEvent
 
 	for _, root := range roots {
-		info, err := os.Stat(root)
-		if err != nil {
-			continue
-		}
-		base := root
-		if !info.IsDir() {
-			base = filepath.Dir(root)
-		}
-
 		if dbPath := openCodeDBPath(root); dbPath != "" {
 			stats.Files++
 			dbEvents, err := parseOpenCodeDB(dbPath, ctx)
@@ -70,47 +61,6 @@ func (openCodeHarness) Load(ctx *LoadContext, roots []string, emit func(Event) e
 					}
 					events = append(events, e)
 				}
-			}
-		}
-
-		// Legacy files are storage/message/<session>/<message>.json. Database
-		// IDs win, matching current ccusage precedence.
-		legacyRoot := filepath.Join(base, "storage", "message")
-		if st, err := os.Stat(legacyRoot); err == nil && st.IsDir() {
-			files, err := walkExtensions(legacyRoot, ctx.Since, ctx.Until, ".json")
-			if err != nil {
-				return err
-			}
-			for _, path := range files {
-				idHint := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-				if idHint != "" && seen[idHint] {
-					continue
-				}
-				stats.Files++
-				stats.Lines++
-				b, err := os.ReadFile(path)
-				if err != nil {
-					return err
-				}
-				e, ok, err := parseOpenCodeMessage(b, idHint, "", 0, fileModifiedTime(path))
-				if err != nil {
-					if e2 := reportMalformed(ctx, "opencode", path, 1, err); e2 != nil {
-						return e2
-					}
-					continue
-				}
-				if !ok {
-					stats.Skipped++
-					continue
-				}
-				if e.ID != "" && seen[e.ID] {
-					stats.Deduplicated++
-					continue
-				}
-				if e.ID != "" {
-					seen[e.ID] = true
-				}
-				events = append(events, e)
 			}
 		}
 	}

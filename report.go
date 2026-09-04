@@ -34,7 +34,6 @@ type Aggregate struct {
 type Aggregator struct {
 	report       string
 	byModel      bool
-	byHarness    bool
 	harnessScope string
 	loc          *time.Location
 	prices       PriceBook
@@ -43,9 +42,9 @@ type Aggregator struct {
 	total        Aggregate
 }
 
-func newAggregator(report string, byModel, byHarness bool, harnessScope string, loc *time.Location, prices PriceBook, noCost bool) *Aggregator {
+func newAggregator(report string, byModel bool, harnessScope string, loc *time.Location, prices PriceBook, noCost bool) *Aggregator {
 	return &Aggregator{
-		report: report, byModel: byModel, byHarness: byHarness, harnessScope: harnessScope,
+		report: report, byModel: byModel, harnessScope: harnessScope,
 		loc: loc, prices: prices, noCost: noCost, groups: map[string]*Aggregate{},
 		total: Aggregate{Harness: "all", Group: "TOTAL", CostComplete: true},
 	}
@@ -61,9 +60,6 @@ func (a *Aggregator) Add(e Event) {
 		}
 	}
 	harness := a.harnessScope
-	if a.byHarness {
-		harness = e.Harness
-	}
 	key := harness + "\x00" + group + "\x00" + model
 	g := a.groups[key]
 	if g == nil {
@@ -159,59 +155,41 @@ func (a *Aggregator) PrintTable(noCost bool) {
 	if a.report == "model" {
 		label = "SCOPE"
 	}
-	showHarness := a.byHarness
-	if showHarness {
-		if noCost {
-			fmt.Fprintf(w, "%s\tAGENT\tMODEL\tINPUT\tOUTPUT\tCACHE_RD\tCACHE_WR\tREASON\tTOTAL\tEVENTS\n", label)
-		} else {
-			fmt.Fprintf(w, "%s\tAGENT\tMODEL\tINPUT\tOUTPUT\tCACHE_RD\tCACHE_WR\tREASON\tTOTAL\tCOST USD\tEVENTS\n", label)
-		}
-	} else {
-		if noCost {
-			fmt.Fprintf(w, "%s\tMODEL\tINPUT\tOUTPUT\tCACHE_RD\tCACHE_WR\tREASON\tTOTAL\tEVENTS\n", label)
-		} else {
-			fmt.Fprintf(w, "%s\tMODEL\tINPUT\tOUTPUT\tCACHE_RD\tCACHE_WR\tREASON\tTOTAL\tCOST USD\tEVENTS\n", label)
-		}
+	header := []string{label, "MODEL", "INPUT", "OUTPUT", "CACHE_RD", "CACHE_WR", "REASON", "TOTAL"}
+	if !noCost {
+		header = append(header, "COST USD")
 	}
+	header = append(header, "EVENTS")
+	fmt.Fprintln(w, strings.Join(header, "\t"))
 	for _, g := range a.sortedGroups() {
 		model := g.Model
 		if model == "" {
 			model = "-"
 		}
-		if showHarness {
-			if noCost {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
-					shortGroup(g.Group), g.Harness, model, fmtInt(g.Input), fmtInt(g.Output), fmtInt(g.CacheRead), fmtInt(g.CacheWrite), fmtInt(g.Reasoning), fmtInt(g.Total), g.Events)
-			} else {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
-					shortGroup(g.Group), g.Harness, model, fmtInt(g.Input), fmtInt(g.Output), fmtInt(g.CacheRead), fmtInt(g.CacheWrite), fmtInt(g.Reasoning), fmtInt(g.Total), formatCost(*g), g.Events)
-			}
-		} else {
-			if noCost {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
-					shortGroup(g.Group), model, fmtInt(g.Input), fmtInt(g.Output), fmtInt(g.CacheRead), fmtInt(g.CacheWrite), fmtInt(g.Reasoning), fmtInt(g.Total), g.Events)
-			} else {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
-					shortGroup(g.Group), model, fmtInt(g.Input), fmtInt(g.Output), fmtInt(g.CacheRead), fmtInt(g.CacheWrite), fmtInt(g.Reasoning), fmtInt(g.Total), formatCost(*g), g.Events)
-			}
-		}
+		writeAggregateRow(w, shortGroup(g.Group), model, *g, noCost)
 	}
 	if len(a.groups) > 0 {
-		if showHarness {
-			if noCost {
-				fmt.Fprintf(w, "TOTAL\tall\t-\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n", fmtInt(a.total.Input), fmtInt(a.total.Output), fmtInt(a.total.CacheRead), fmtInt(a.total.CacheWrite), fmtInt(a.total.Reasoning), fmtInt(a.total.Total), a.total.Events)
-			} else {
-				fmt.Fprintf(w, "TOTAL\tall\t-\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n", fmtInt(a.total.Input), fmtInt(a.total.Output), fmtInt(a.total.CacheRead), fmtInt(a.total.CacheWrite), fmtInt(a.total.Reasoning), fmtInt(a.total.Total), formatCost(a.total), a.total.Events)
-			}
-		} else {
-			if noCost {
-				fmt.Fprintf(w, "TOTAL\t-\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n", fmtInt(a.total.Input), fmtInt(a.total.Output), fmtInt(a.total.CacheRead), fmtInt(a.total.CacheWrite), fmtInt(a.total.Reasoning), fmtInt(a.total.Total), a.total.Events)
-			} else {
-				fmt.Fprintf(w, "TOTAL\t-\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n", fmtInt(a.total.Input), fmtInt(a.total.Output), fmtInt(a.total.CacheRead), fmtInt(a.total.CacheWrite), fmtInt(a.total.Reasoning), fmtInt(a.total.Total), formatCost(a.total), a.total.Events)
-			}
-		}
+		writeAggregateRow(w, "TOTAL", "-", a.total, noCost)
 	}
 	_ = w.Flush()
+}
+
+func writeAggregateRow(w *tabwriter.Writer, group, model string, g Aggregate, noCost bool) {
+	row := []string{
+		group,
+		model,
+		fmtInt(g.Input),
+		fmtInt(g.Output),
+		fmtInt(g.CacheRead),
+		fmtInt(g.CacheWrite),
+		fmtInt(g.Reasoning),
+		fmtInt(g.Total),
+	}
+	if !noCost {
+		row = append(row, formatCost(g))
+	}
+	row = append(row, strconv.Itoa(g.Events))
+	fmt.Fprintln(w, strings.Join(row, "\t"))
 }
 
 func shortGroup(s string) string {

@@ -130,8 +130,7 @@ func run(args []string) error {
 	// the second. Harness identity is deliberately not part of reporting: it is
 	// only an adapter concern used while parsing and deduplicating source logs.
 	groupByModel := true
-	groupByHarness := false
-	agg := newAggregator(report, groupByModel, groupByHarness, harnessName, loc, prices, *noCost)
+	agg := newAggregator(report, groupByModel, harnessName, loc, prices, *noCost)
 
 	for _, h := range selected {
 		roots := pathOverrides[h.Name()]
