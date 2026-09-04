@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build release binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+
+          for ARCH in amd64 arm64; do
+            NAME="llm_usage_${VERSION}_linux_${ARCH}"
+
+            CGO_ENABLED=0 \
+            GOOS=linux \
+            GOARCH="${ARCH}" \
+              go build \
+                -trimpath \
+                -o "dist/${NAME}" \
+                .
+
+            tar -C dist -czf "dist/${NAME}.tar.gz" "${NAME}"
+            rm "dist/${NAME}"
+          done
+
+          (
+            cd dist
+            sha256sum *.tar.gz > checksums.txt
+          )
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --verify-tag \
+            --generate-notes \
+            --title "${GITHUB_REF_NAME}" \
+            dist/*
